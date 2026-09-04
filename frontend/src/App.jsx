@@ -268,8 +268,11 @@ export default function App() {
                 <span className="text-[10px] bg-slate-900 text-white px-2 py-1">LIVE</span>
               </h2>
               
-              <div className="flex-1 flex flex-col items-center justify-center">
-                <div className={`text-6xl font-black mb-2 tracking-tighter ${sysState.color}`}>{anomalyScore}</div>
+              <div className="flex-1 flex flex-col items-center justify-center w-full px-8">
+                <div className="flex items-baseline gap-1 mb-2">
+                  <span className={`text-6xl font-black tracking-tighter ${sysState.color}`}>{anomalyScore}</span>
+                  <span className="text-2xl font-bold text-slate-400">/100</span>
+                </div>
                 <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-8">Anomaly Score</div>
                 
                 <div className={`px-4 py-2 border-2 border-slate-900 shadow-[4px_4px_0px_rgba(15,23,42,1)] font-bold tracking-widest text-sm ${sysState.color}`}>
