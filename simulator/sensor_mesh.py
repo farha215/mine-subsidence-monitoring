@@ -7,7 +7,7 @@ import paho.mqtt.client as mqtt
 
 BROKER = "broker.emqx.io"
 PORT = 1883
-TOPIC = "antigravity/hackathon/panel4/telemetry/998877"
+TOPIC = "terraguard/hackathon/panel4/telemetry/998877"
 
 def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:

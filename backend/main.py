@@ -16,7 +16,7 @@ app.add_middleware(
 
 BROKER = "broker.emqx.io"
 PORT = 1883
-TOPIC = "antigravity/hackathon/panel4/telemetry/998877"
+TOPIC = "terraguard/hackathon/panel4/telemetry/998877"
 
 # Store connected websocket clients (the frontend dashboard)
 connected_clients = set()

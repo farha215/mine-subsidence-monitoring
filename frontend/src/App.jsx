@@ -127,7 +127,7 @@ export default function App() {
         <div className="flex items-center gap-3">
           <HardHat className="text-yellow-500 w-8 h-8" />
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">Project Antigravity</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white">Project TerraGuard</h1>
             <p className="text-sm text-slate-400">DGMS Continuous Strata Monitoring System</p>
           </div>
         </div>

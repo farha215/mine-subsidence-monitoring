@@ -1,4 +1,4 @@
-# Project Antigravity - DGMS Continuous Strata Monitoring System
+# Project TerraGuard - DGMS Continuous Strata Monitoring System
 
 This is the hackathon prototype for an AI-powered early warning system for mine subsidence and tertiary creep prediction. 
 
@@ -77,5 +77,5 @@ Once the simulator is running, it will constantly feed "NORMAL" baseline data. Y
 ---
 
 ## Technical Architecture Notes
-- **MQTT**: The hardware simulator publishes to `antigravity/hackathon/panel4/telemetry/998877` on the public `broker.emqx.io` broker. The backend subscribes to this topic.
+- **MQTT**: The hardware simulator publishes to `terraguard/hackathon/panel4/telemetry/998877` on the public `broker.emqx.io` broker. The backend subscribes to this topic.
 - **WebSocket**: The React frontend connects to `ws://localhost:8000/ws` for sub-second telemetry and AI state updates. It features auto-reconnect capabilities.
