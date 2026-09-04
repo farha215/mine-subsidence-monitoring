@@ -1,4 +1,4 @@
-# Project TerraGuard - DGMS Continuous Strata Monitoring System
+# Project T-Minus - DGMS Continuous Strata Monitoring System
 
 This is the hackathon prototype for an AI-powered early warning system for mine subsidence and tertiary creep prediction. 
 

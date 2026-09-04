@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { MapContainer, TileLayer, CircleMarker, Popup, Polygon, Circle } from 'react-leaflet';
+import React, { useState, useEffect, useMemo } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { MapContainer, TileLayer, CircleMarker, Popup, Polygon, Circle, ImageOverlay } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { AlertTriangle, Map as MapIcon, HardHat, Cpu } from 'lucide-react';
+import { AlertTriangle, Map as MapIcon, HardHat, Cpu, Battery, BatteryCharging, Signal, AlertCircle, Activity, X, ArrowRight, Layers, LayoutGrid } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 // Jharia Coalfield Coordinates
 const CENTER = [23.7431, 86.4190];
@@ -16,37 +17,77 @@ export default function App() {
   const [selectedNode, setSelectedNode] = useState('node_1');
   const [hasCollapsed, setHasCollapsed] = useState(false);
   const [isAlarmDismissed, setIsAlarmDismissed] = useState(false);
-  const [showPlanningGrid, setShowPlanningGrid] = useState(false);
+  
+  // Slide Panels instead of Modals
+  const [activePanel, setActivePanel] = useState(null); // 'fleet', 'ahsm', or null
   const [isGridGenerated, setIsGridGenerated] = useState(false);
 
-  // AHSM Planning Grid Data
-  const riskZonePolygon = [
-    [23.7460, 86.4130],
-    [23.7460, 86.4240],
-    [23.7390, 86.4240],
-    [23.7390, 86.4130],
-  ];
+  // Geotechnical States
+  const [extractionMethod, setExtractionMethod] = useState('Traditional Pillar');
+  const [showDinsar, setShowDinsar] = useState(false);
+  const [mineDepth, setMineDepth] = useState(150);
+  const [seamThickness, setSeamThickness] = useState(4.5);
+  const [keyStratumDepth, setKeyStratumDepth] = useState(50);
+  const [drawAngleStr, setDrawAngleStr] = useState("45"); // "45", "35", "22"
 
-  const suggestedPlacements = [];
-  // Increased density (smaller step size) for closer nodes
-  for(let lat=23.7405; lat<=23.7445; lat+=0.0012) {
-    for(let lng=86.4145; lng<=86.4225; lng+=0.0015) {
-      suggestedPlacements.push([lat, lng]);
-    }
-  }
-
-  const togglePlanner = () => {
-    setShowPlanningGrid(!showPlanningGrid);
-    setIsGridGenerated(false); // Reset grid when toggling
-  };
-
+  // Live nodes clustered tightly (exactly 100m apart in a micro-array cross formation)
   const nodes = [
-    { id: 'node_1', pos: [23.7431, 86.4190] },
-    { id: 'node_2', pos: [23.7450, 86.4210] },
-    { id: 'node_3', pos: [23.7410, 86.4170] },
-    { id: 'node_4', pos: [23.7440, 86.4150] },
-    { id: 'node_5', pos: [23.7415, 86.4220] }
+    { id: 'node_1', pos: [23.7431, 86.4190] }, // Center
+    { id: 'node_2', pos: [23.7440, 86.4190] }, // North (100m)
+    { id: 'node_3', pos: [23.7422, 86.4190] }, // South (100m)
+    { id: 'node_4', pos: [23.7431, 86.4199] }, // East (100m)
+    { id: 'node_5', pos: [23.7431, 86.4181] }  // West (100m)
   ];
+
+  // AHSM Polygon Math (Hyperbolic Subsidence Trough)
+  const riskZonePolygon = useMemo(() => {
+    const points = [];
+    const centerX = CENTER[0];
+    const centerY = CENTER[1];
+    const metersToDeg = 1 / 111111; 
+    const drawAngleRad = parseFloat(drawAngleStr) * (Math.PI / 180);
+    const extentMeters = mineDepth * Math.tan(drawAngleRad);
+    
+    // Hyperbola vertices stretch (assume underlying panel is 200m x 100m)
+    const semiMajorMeters = 100 + extentMeters; 
+    const semiMinorMeters = 50 + extentMeters;
+
+    // Draw an ellipse to approximate the hyperbolic trough on the surface
+    for (let i = 0; i <= 360; i += 5) {
+      const rad = i * (Math.PI / 180);
+      const lat = centerX + (semiMajorMeters * Math.cos(rad) * metersToDeg);
+      const lng = centerY + (semiMinorMeters * Math.sin(rad) * metersToDeg);
+      points.push([lat, lng]);
+    }
+    return points;
+  }, [mineDepth, drawAngleStr]);
+
+  const suggestedPlacements = useMemo(() => {
+    const placements = [];
+    if (!isGridGenerated) return placements;
+    
+    const metersToDeg = 1 / 111111;
+    const drawAngleRad = parseFloat(drawAngleStr) * (Math.PI / 180);
+    const extentMeters = mineDepth * Math.tan(drawAngleRad);
+    const semiMajorMeters = 100 + extentMeters; 
+    const semiMinorMeters = 50 + extentMeters;
+    
+    const boundsDegLat = semiMajorMeters * metersToDeg;
+    const boundsDegLng = semiMinorMeters * metersToDeg;
+    
+    // Space sensors denser near inflection points (closer to the edges)
+    for(let lat = CENTER[0] - boundsDegLat; lat <= CENTER[0] + boundsDegLat; lat += 0.0009) {
+      for(let lng = CENTER[1] - boundsDegLng; lng <= CENTER[1] + boundsDegLng; lng += 0.0009) {
+        // Check if inside ellipse
+        const dx = (lat - CENTER[0]) / boundsDegLat;
+        const dy = (lng - CENTER[1]) / boundsDegLng;
+        if (dx*dx + dy*dy <= 1.0) {
+           placements.push([lat, lng]);
+        }
+      }
+    }
+    return placements;
+  }, [mineDepth, drawAngleStr, isGridGenerated]);
 
   useEffect(() => {
     let ws;
@@ -80,6 +121,7 @@ export default function App() {
         
         setDataStream(prev => {
           const newData = [...prev, payload];
+          // 5 seconds of short-term memory (10Hz = 50 data points)
           if (newData.length > 50) return newData.slice(newData.length - 50);
           return newData;
         });
@@ -94,24 +136,25 @@ export default function App() {
     };
   }, []);
 
-  const anomalyScore = currentData?.global_anomaly_score || 0;
+  // Use current data for the dashboard
+  const displayData = currentData;
+  const anomalyScore = displayData?.global_anomaly_score || 0;
   const isCritical = (anomalyScore === 100 || hasCollapsed) && !isAlarmDismissed;
 
   const getSystemStateDisplay = (state, score) => {
     switch(state) {
-      case 'NORMAL': return { text: 'System Nominal', color: 'text-emerald-400', banner: null };
-      case 'TRUCK': return { text: 'Transient Vibration Anomaly', color: 'text-yellow-400', banner: 'Notice: High transient surface vibration detected (Profile: Heavy Machinery). AI Risk Engine has classified this as non-threatening.' };
-      case 'BLASTING': return { text: 'Seismic Shock Anomaly', color: 'text-orange-400', banner: 'Warning: Instantaneous seismic shock detected (Profile: Adjacent Blasting). Strata remains stable. No evacuation required.' };
+      case 'NORMAL': return { text: 'NOMINAL', color: 'text-emerald-700', banner: null };
+      case 'TRUCK': return { text: 'TRANSIENT VIBRATION', color: 'text-yellow-700', banner: 'Notice: High transient surface vibration detected (Profile: Heavy Machinery). AI Risk Engine has classified this as non-threatening.' };
+      case 'BLASTING': return { text: 'SEISMIC SHOCK', color: 'text-orange-700', banner: 'Warning: Instantaneous seismic shock detected (Profile: Adjacent Blasting). Strata remains stable. No evacuation required.' };
       case 'COLLAPSE': 
-        if (score === 100) return { text: 'Critical Strata Failure', color: 'text-red-500', banner: null };
-        return { text: 'Sustained Strata Movement', color: 'text-orange-500', banner: 'Alert: Continuous strata acceleration detected. AI Risk Engine analyzing collapse probability...' };
-      default: return { text: 'AWAITING DATA', color: 'text-slate-500', banner: null };
+        if (score === 100) return { text: 'CRITICAL FAILURE', color: 'text-red-700', banner: null };
+        return { text: 'SUSTAINED MOVEMENT', color: 'text-orange-700', banner: 'Alert: Continuous strata acceleration detected. AI Risk Engine analyzing collapse probability.' };
+      default: return { text: 'AWAITING DATA', color: 'text-slate-900', banner: null };
     }
   };
 
-  const sysState = getSystemStateDisplay(currentData?.simulator_state, anomalyScore);
+  const sysState = getSystemStateDisplay(displayData?.simulator_state, anomalyScore);
 
-  // Chart data formatted dynamically based on selected node
   const chartData = dataStream.map(d => ({
     time: new Date(d.timestamp * 1000).toLocaleTimeString([], {minute: '2-digit', second:'2-digit'}),
     tilt: d.nodes[selectedNode]?.tilt || 0,
@@ -119,276 +162,484 @@ export default function App() {
     accel: d.nodes[selectedNode]?.acceleration || 0,
   }));
 
+  // Dynamic AI Thresholds based on Extraction Method
+  const tiltThreshold = extractionMethod === 'Wide Stall' ? 1.5 : 0.5;
+  const vibThreshold = extractionMethod === 'Wide Stall' ? 25.0 : 15.0;
+
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-6 font-sans">
+    <div className="min-h-screen bg-slate-200 text-slate-900 font-sans flex flex-col relative overflow-hidden selection:bg-cyan-200">
       
-      {/* HEADER */}
-      <header className="flex justify-between items-center mb-6 bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg">
-        <div className="flex items-center gap-3">
-          <HardHat className="text-yellow-500 w-8 h-8" />
+      {/* HEADER - Rigid, full width, sharp borders */}
+      <header className="flex justify-between items-center bg-slate-100 border-b-2 border-slate-900 px-6 py-4 z-20">
+        <div className="flex items-center gap-4">
+          <div className="p-2 bg-sky-300 border-2 border-slate-900 shadow-[4px_4px_0px_rgba(15,23,42,1)]">
+            <HardHat className="w-7 h-7 text-slate-900" strokeWidth={2.5} />
+          </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">Project TerraGuard</h1>
-            <p className="text-sm text-slate-400">DGMS Continuous Strata Monitoring System</p>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 uppercase leading-none">T-Minus</h1>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Subsidence Platform</p>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        
+        <div className="flex items-center gap-8">
+          
+
           <div className="flex flex-col text-right">
-            <span className="text-xs text-slate-400 uppercase tracking-wider">Site Location</span>
-            <span className="font-semibold text-emerald-400">Jharia Coalfield, Panel 4</span>
+            <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Location</span>
+            <span className="text-sm font-bold text-slate-900 uppercase">Jharia Panel 4</span>
           </div>
-          <div className={`px-3 py-1 rounded-full text-xs font-bold border ${wsStatus === 'Connected' ? 'bg-emerald-900/30 text-emerald-400 border-emerald-500/50' : 'bg-red-900/30 text-red-400 border-red-500/50'}`}>
-            {wsStatus}
+          
+          <div className="flex flex-col text-right">
+            <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Uplink</span>
+            <span className={`text-sm font-bold uppercase flex items-center justify-end gap-2 ${wsStatus === 'Connected' ? 'text-emerald-700' : 'text-red-700'}`}>
+              {wsStatus === 'Connected' && <div className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></div>}
+              {wsStatus}
+            </span>
           </div>
+
+          <div className="h-8 w-px bg-slate-300"></div>
+
+          <button 
+            onClick={() => setActivePanel(activePanel === 'fleet' ? null : 'fleet')}
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-widest border-2 border-slate-900 transition-all ${activePanel === 'fleet' ? 'bg-sky-300 text-slate-900 shadow-[4px_4px_0px_rgba(15,23,42,1)]' : 'bg-slate-100 text-slate-900 hover:bg-sky-300 hover:shadow-[4px_4px_0px_rgba(15,23,42,1)] translate-x-[2px] translate-y-[2px] hover:translate-x-0 hover:translate-y-0'}`}
+          >
+            <Activity className="w-4 h-4" /> Fleet Status
+          </button>
         </div>
       </header>
 
-      {/* WARNING BANNER FOR NON-CRITICAL ANOMALIES */}
-      {sysState.banner && !isCritical && (
-        <div className="bg-yellow-900/40 border border-yellow-500/50 rounded-lg p-3 mb-6 flex items-center gap-3 animate-pulse shadow-lg">
-          <AlertTriangle className="text-yellow-500 w-5 h-5 flex-shrink-0" />
-          <span className="text-yellow-200 text-sm font-mono">{sysState.banner}</span>
-        </div>
-      )}
+      {/* WARNING BANNER */}
+      <AnimatePresence>
+        {sysState.banner && !isCritical && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden bg-yellow-400 border-b-2 border-slate-900 text-slate-900 font-bold px-6 py-3 flex items-center gap-4 text-sm z-10"
+          >
+            <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+            <span className="uppercase tracking-wide">{sysState.banner}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* DGMS CRITICAL ALERT MODAL */}
-      {hasCollapsed && !isAlarmDismissed && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-red-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border-2 border-red-500 p-8 rounded-2xl shadow-2xl max-w-2xl w-full text-center animate-pulse">
-            <AlertTriangle className="w-24 h-24 text-red-500 mx-auto mb-6" />
-            <h2 className="text-4xl font-black text-red-500 mb-2">EARLY WARNING ALERT</h2>
-            <h3 className="text-2xl font-bold text-white mb-6">Onset of Tertiary Creep Predicted (Panel 4)</h3>
-            <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-lg mb-6 text-left">
-              <p className="text-red-300 font-mono text-sm leading-relaxed">
-                [AI PREDICTION LOG]: Hyperbolic acceleration d²θ/dt² exceeded safety threshold (0.05°/s²). 
-                High probability of surface breakthrough within 72-120 hours. Initiating DGMS Level 3 Preventative Evacuation Protocol.
+      {/* CRITICAL ALERT - Replaces the bubbly modal with a full-screen takeover banner */}
+      <AnimatePresence>
+        {hasCollapsed && !isAlarmDismissed && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[999] bg-red-600 flex flex-col items-center justify-center text-white"
+          >
+            <div className="absolute inset-0 border-[16px] border-white animate-pulse pointer-events-none"></div>
+            <AlertTriangle className="relative z-10 w-32 h-32 mb-8 text-white animate-pulse" strokeWidth={1.5} />
+            <h2 className="relative z-10 text-6xl font-black mb-4 tracking-tighter uppercase text-white">Evacuate Area</h2>
+            <h3 className="relative z-10 text-2xl font-bold mb-12 uppercase tracking-widest">Tertiary Creep / Strata Failure Imminent</h3>
+            
+            <div className="relative z-10 bg-black/20 border-2 border-white/30 p-6 mb-12 max-w-2xl text-left font-mono">
+              <p className="text-white text-base leading-relaxed">
+                <span className="font-bold">[AI_PREDICTION_LOG]:</span> Hyperbolic acceleration d²θ/dt² exceeded safety threshold. High probability of surface breakthrough within 72-120 hours. 
               </p>
             </div>
-            <p className="text-xl font-bold text-white uppercase tracking-widest mb-4">Initiate Controlled Site Evacuation</p>
+            
             <button 
               onClick={() => setIsAlarmDismissed(true)} 
-              className="mt-4 px-4 py-2 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 text-sm"
+              className="relative z-10 px-8 py-4 bg-slate-100 text-red-700 hover:bg-slate-200 transition-colors font-bold uppercase tracking-widest text-sm border-2 border-slate-900 cursor-pointer shadow-[8px_8px_0px_rgba(15,23,42,1)] active:shadow-none active:translate-x-2 active:translate-y-2"
             >
-              Acknowledge & Dismiss Alarm
+              Acknowledge Warning
             </button>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* MAIN GRID LAYOUT - Flat, border-separated */}
+      <div className="flex-1 flex overflow-hidden">
         
-        {/* LEFT COLUMN: Map & AI Engine */}
-        <div className="space-y-6">
+        {/* MAIN DASHBOARD AREA */}
+        <main className={`flex-1 flex flex-col transition-all duration-300 border-r-2 border-slate-900`}>
           
-          <div className={`bg-slate-800 rounded-xl border p-5 shadow-lg transition-colors duration-500 ${isCritical ? 'border-red-500 shadow-red-900/50' : 'border-slate-700'}`}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Cpu className="text-blue-400 w-5 h-5" />
-                <h2 className="text-lg font-semibold text-white">AI Risk Assessment Engine</h2>
-              </div>
-            </div>
-            
-            <div className="flex items-end gap-4 mb-2">
-              <div className="text-5xl font-black tabular-nums" style={{ color: anomalyScore > 50 ? '#ef4444' : '#10b981' }}>
-                {anomalyScore}%
-              </div>
-              <div className="text-sm text-slate-400 mb-1 uppercase tracking-wider">Subsidence Risk Score</div>
-            </div>
-            
-            <div className="w-full bg-slate-900 rounded-full h-3 mb-4 overflow-hidden border border-slate-700">
-              <div className={`h-3 rounded-full transition-all duration-300 ${anomalyScore > 50 ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${anomalyScore}%` }}></div>
-            </div>
-
-            <div className="bg-slate-900 rounded-lg p-3 text-sm font-mono border border-slate-700 mt-2">
-              <div className="flex justify-between mb-2 pb-2 border-b border-slate-800">
-                <span className="text-slate-500">System State:</span>
-                <span className={sysState.color}>
+          {/* Top Row: AI Risk & Map */}
+          <div className="flex-[2] flex border-b-2 border-slate-900">
+            {/* Left Column: AI Risk Engine */}
+            <div className="w-1/3 border-r-2 border-slate-900 flex flex-col bg-slate-100 p-6">
+              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest mb-6 flex justify-between items-center">
+                AI Risk Engine
+                <span className="text-[10px] bg-slate-900 text-white px-2 py-1">LIVE</span>
+              </h2>
+              
+              <div className="flex-1 flex flex-col items-center justify-center">
+                <div className={`text-6xl font-black mb-2 tracking-tighter ${sysState.color}`}>{anomalyScore}</div>
+                <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-8">Anomaly Score</div>
+                
+                <div className={`px-4 py-2 border-2 border-slate-900 shadow-[4px_4px_0px_rgba(15,23,42,1)] font-bold tracking-widest text-sm ${sysState.color}`}>
                   {sysState.text}
-                </span>
+                </div>
               </div>
-              <div className="flex justify-between mb-2">
-                <span className="text-slate-500">Selected Node:</span>
-                <span className="text-slate-300">{selectedNode.replace('_', ' ').toUpperCase()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">d²θ/dt² Accel:</span>
-                <span className="text-blue-400">{currentData?.nodes[selectedNode]?.acceleration || 0} °/s²</span>
-              </div>
-            </div>
-          </div>
 
-          <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-lg p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <MapIcon className="text-emerald-400 w-5 h-5" />
-                <h2 className="text-lg font-semibold text-white">Live Deployment Map</h2>
+              <div className="mt-8 pt-6 border-t-2 border-slate-900">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4">Live Telemetry Feed</div>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 uppercase">Focus Node</span>
+                    <span className="text-slate-900 font-bold">{selectedNode.toUpperCase()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 uppercase">Accel d²θ/dt²</span>
+                    <span className="text-slate-900 font-bold">{displayData?.nodes[selectedNode]?.acceleration || 0} °/s²</span>
+                  </div>
+                </div>
               </div>
+
               <button 
-                onClick={togglePlanner}
-                className={`text-xs font-bold px-3 py-1 rounded border transition-colors ${showPlanningGrid ? 'bg-blue-900/50 text-blue-400 border-blue-500' : 'bg-slate-700 text-slate-300 border-slate-600'} hover:bg-slate-600`}
+                onClick={() => setActivePanel(activePanel === 'ahsm' ? null : 'ahsm')}
+                className="w-full mt-6 py-3 bg-sky-300 text-slate-900 font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2 border-2 border-slate-900 shadow-[4px_4px_0px_rgba(15,23,42,1)] hover:shadow-none hover:translate-y-1 hover:translate-x-1"
               >
-                {showPlanningGrid ? 'Close AHSM Planner' : 'Open AHSM Planner'}
+                Launch Planner <ArrowRight className="w-4 h-4" />
               </button>
             </div>
-            <div className="h-[350px] rounded-lg overflow-hidden border border-slate-700 relative">
-              
-              {/* INTERACTIVE PLANNING MOCK FORM */}
-              {showPlanningGrid && !isGridGenerated && (
-                <div className="absolute top-2 left-2 z-[400] bg-slate-900/95 border border-slate-600 p-4 rounded-lg shadow-xl backdrop-blur-sm text-sm font-mono w-64">
-                  <h3 className="text-emerald-400 font-bold mb-3 border-b border-slate-700 pb-2">AHSM Parameters</h3>
-                  
-                  <div className="mb-3">
-                    <label className="text-slate-400 block mb-1 text-xs">Mine Location (Lat, Lng)</label>
-                    <input type="text" defaultValue={"23.7431, 86.4190"} className="w-full bg-slate-800 border border-slate-700 rounded p-1 text-white outline-none focus:border-blue-500" />
-                  </div>
 
-                  <div className="mb-3">
-                    <label className="text-slate-400 block mb-1 text-xs">Extraction Depth (m)</label>
-                    <input type="number" defaultValue={450} className="w-full bg-slate-800 border border-slate-700 rounded p-1 text-white outline-none focus:border-blue-500" />
-                  </div>
-                  
-                  <div className="mb-3">
-                    <label className="text-slate-400 block mb-1 text-xs">Seam Thickness (m)</label>
-                    <input type="number" defaultValue={4.5} className="w-full bg-slate-800 border border-slate-700 rounded p-1 text-white outline-none focus:border-blue-500" />
-                  </div>
-                  
-                  <div className="mb-3">
-                    <label className="text-slate-400 block mb-1 text-xs">Overburden Type</label>
-                    <select className="w-full bg-slate-800 border border-slate-700 rounded p-1 text-white outline-none focus:border-blue-500">
-                      <option>Hard Sandstone (22°)</option>
-                      <option>Soft Alluvium (45°)</option>
-                      <option>Shale Mix (35°)</option>
-                    </select>
-                  </div>
-                  
-                  <button 
-                    onClick={() => setIsGridGenerated(true)}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 rounded mt-2 transition-colors"
-                  >
-                    Calculate & Draw Grid
-                  </button>
+            {/* Map Area */}
+            <div className="w-2/3 relative flex flex-col bg-slate-200">
+              <div className="absolute top-4 left-4 z-[400] flex gap-2">
+                <div className="bg-slate-100 border-2 border-slate-900 px-3 py-1 font-bold text-xs uppercase tracking-widest shadow-[4px_4px_0px_rgba(15,23,42,1)] text-slate-900">
+                  Live Deployment Map
                 </div>
-              )}
+                <button 
+                  onClick={() => setShowDinsar(!showDinsar)}
+                  className={`border-2 border-slate-900 px-3 py-1 font-bold text-xs uppercase tracking-widest shadow-[4px_4px_0px_rgba(15,23,42,1)] transition-colors flex items-center gap-2 cursor-pointer ${showDinsar ? 'bg-amber-400 text-slate-900' : 'bg-slate-100 text-slate-900 hover:bg-slate-200'}`}
+                >
+                  <Layers className="w-3 h-3" /> D-InSAR Heatmap
+                </button>
+              </div>
 
-              {/* READOUT AFTER GENERATION */}
-              {showPlanningGrid && isGridGenerated && (
-                <div className="absolute top-2 left-2 z-[400] bg-slate-900/95 border border-slate-600 p-4 rounded-lg shadow-xl backdrop-blur-sm text-sm font-mono w-72 flex flex-col max-h-[90%]">
-                  <h3 className="text-emerald-400 font-bold mb-2 border-b border-slate-700 pb-2">AHSM Deployment Manifest</h3>
-                  <div className="text-xs text-slate-300 mb-3 space-y-1">
-                    <p><span className="text-slate-500">Target:</span> Jharia Panel 4</p>
-                    <p><span className="text-slate-500">Angle of Draw:</span> 22°</p>
-                    <p><span className="text-slate-500">Required Nodes:</span> {suggestedPlacements.length}</p>
-                  </div>
+              <div className="flex-1 w-full h-full">
+                <MapContainer center={CENTER} zoom={17} style={{ height: '100%', width: '100%' }} zoomControl={false}>
+                  <TileLayer
+                    url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    attribution="Tiles &copy; Esri"
+                  />
                   
-                  <h4 className="text-slate-400 text-xs font-bold mb-2 uppercase tracking-wider">Optimal GPS Coordinates</h4>
-                  <div className="overflow-y-auto flex-1 border border-slate-700 rounded bg-slate-950 p-2 space-y-1 max-h-48 custom-scrollbar">
-                    {suggestedPlacements.map((pos, i) => (
-                      <div key={i} className="text-[10px] flex justify-between border-b border-slate-800/50 pb-1">
-                        <span className="text-slate-500">AHSM-{i+1 < 10 ? `0${i+1}` : i+1}</span>
-                        <span className="text-blue-400">{pos[0].toFixed(5)}, {pos[1].toFixed(5)}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <button 
-                    onClick={() => setIsGridGenerated(false)}
-                    className="w-full bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold py-2 rounded mt-3 transition-colors"
-                  >
-                    Modify Parameters
-                  </button>
-                </div>
-              )}
-
-              <MapContainer center={CENTER} zoom={16} style={{ height: '100%', width: '100%' }} zoomControl={false}>
-                <TileLayer
-                  url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                  attribution="Tiles &copy; Esri"
-                />
-                
-                {/* AHSM Planning Overlays */}
-                {showPlanningGrid && isGridGenerated && (
-                  <>
-                    <Polygon 
-                      positions={riskZonePolygon} 
-                      pathOptions={{ color: '#f97316', fillColor: '#f97316', fillOpacity: 0.1, dashArray: '5, 10', weight: 2 }} 
+                  {/* D-InSAR Satellite Heatmap Overlay - Realistic Image */}
+                  {showDinsar && (
+                    <ImageOverlay
+                      url="/heatmap.png"
+                      bounds={[[23.736, 86.411], [23.750, 86.427]]}
+                      opacity={0.4}
+                      className="mix-blend-multiply blur-[12px]"
                     />
-                    {suggestedPlacements.map((pos, i) => (
-                      <Circle 
-                        key={`sugg_${i}`} 
-                        center={pos} 
-                        radius={15} 
-                        pathOptions={{ color: '#3b82f6', fillOpacity: 0.15, weight: 1.5, dashArray: '3, 3' }} 
+                  )}
+
+                  {/* AHSM Planning Overlays */}
+                  {isGridGenerated && (
+                    <>
+                      <Polygon 
+                        positions={riskZonePolygon} 
+                        pathOptions={{ color: '#f97316', fillColor: '#f97316', fillOpacity: 0.15, dashArray: '5, 10', weight: 2 }} 
                       />
-                    ))}
-                  </>
+                      {suggestedPlacements.map((pos, i) => (
+                        <Circle 
+                          key={`sugg_${i}`} 
+                          center={pos} 
+                          radius={12} 
+                          pathOptions={{ color: '#0f172a', fillColor: '#f8fafc', fillOpacity: 0.8, weight: 2 }}
+                        />
+                      ))}
+                    </>
+                  )}
+                  {nodes.map(node => (
+                    <CircleMarker
+                      key={node.id}
+                      center={node.pos}
+                      radius={isCritical ? 14 : 10}
+                      eventHandlers={{ click: () => setSelectedNode(node.id) }}
+                      pathOptions={{
+                        color: '#0f172a',
+                        fillColor: selectedNode === node.id ? '#7dd3fc' : (isCritical ? '#ef4444' : '#ffffff'),
+                        fillOpacity: 1,
+                        weight: 2,
+                        className: isCritical ? 'animate-ping' : ''
+                      }}
+                    >
+                      <Popup className="font-sans font-bold text-slate-900 border-2 border-slate-900 rounded-none shadow-[4px_4px_0px_rgba(15,23,42,1)]">
+                        <div className="text-sm">{node.id.toUpperCase()}</div>
+                      </Popup>
+                    </CircleMarker>
+                  ))}
+                </MapContainer>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Row: Telemetry Charts (3 Columns) */}
+          <div className="flex flex-1 min-h-[250px]">
+            {/* Vibration Chart */}
+            <div className="w-1/3 border-r-2 border-slate-900 p-4 flex flex-col bg-slate-100">
+              <div className="flex justify-between items-end mb-4 border-b-2 border-slate-900 pb-2">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Vibration (PPV mm/s)</h2>
+                </div>
+                <select 
+                  value={selectedNode} 
+                  onChange={(e) => setSelectedNode(e.target.value)}
+                  className="bg-transparent text-slate-900 text-xs font-bold uppercase tracking-widest outline-none cursor-pointer"
+                >
+                  {nodes.map(n => <option key={n.id} value={n.id}>{n.id.toUpperCase()}</option>)}
+                </select>
+              </div>
+              <div className="flex-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="2 2" stroke="#cbd5e1" vertical={false} />
+                    <XAxis dataKey="time" stroke="#64748b" tick={{fontSize: 10, fontFamily: 'Space Grotesk'}} axisLine={false} tickLine={false} />
+                    <YAxis stroke="#64748b" tick={{fontSize: 10, fontFamily: 'Space Grotesk'}} axisLine={false} tickLine={false} />
+                    <Tooltip 
+                      contentStyle={{backgroundColor: '#0f172a', color: '#fff', border: 'none', borderRadius: '0', boxShadow: '4px 4px 0px rgba(15,23,42,1)'}} 
+                      itemStyle={{color: '#fff', fontWeight: 'bold'}}
+                    />
+                    <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
+                    <ReferenceLine y={vibThreshold} stroke="#f59e0b" strokeDasharray="5 5" label={{ value: `AI Limit (${extractionMethod})`, fill: '#f59e0b', fontSize: 10, position: 'insideTopLeft' }} />
+                    <ReferenceLine y={-vibThreshold} stroke="#f59e0b" strokeDasharray="5 5" />
+                    <Line type="linear" dataKey="vib" stroke="#0f172a" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            
+            {/* Tilt Chart */}
+            <div className="w-1/3 border-r-2 border-slate-900 p-4 flex flex-col bg-slate-100">
+              <div className="flex justify-between items-end mb-4 border-b-2 border-slate-900 pb-2">
+                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Displacement (θ)</h2>
+                <div className="text-xs font-bold text-slate-500 uppercase">{selectedNode.toUpperCase()}</div>
+              </div>
+              <div className="flex-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="2 2" stroke="#cbd5e1" vertical={false} />
+                    <XAxis dataKey="time" stroke="#64748b" tick={{fontSize: 10, fontFamily: 'Space Grotesk'}} axisLine={false} tickLine={false} />
+                    <YAxis stroke="#64748b" tick={{fontSize: 10, fontFamily: 'Space Grotesk'}} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                    <Tooltip 
+                      contentStyle={{backgroundColor: '#0f172a', color: '#fff', border: 'none', borderRadius: '0', boxShadow: '4px 4px 0px rgba(15,23,42,1)'}} 
+                      itemStyle={{color: '#7dd3fc', fontWeight: 'bold'}}
+                    />
+                    <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
+                    <ReferenceLine y={tiltThreshold} stroke="#ef4444" strokeDasharray="5 5" label={{ value: `Failure Threshold`, fill: '#ef4444', fontSize: 10, position: 'insideTopLeft' }} />
+                    <Line type="monotone" dataKey="tilt" stroke="#7dd3fc" strokeWidth={3} dot={false} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Tilt Acceleration (Secondary Derivative) Chart */}
+            <div className="w-1/3 p-4 flex flex-col bg-slate-100">
+              <div className="flex justify-between items-end mb-4 border-b-2 border-slate-900 pb-2">
+                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Acceleration (d²θ/dt²)</h2>
+                <div className="text-xs font-bold text-slate-500 uppercase">{selectedNode.toUpperCase()}</div>
+              </div>
+              <div className="flex-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="2 2" stroke="#cbd5e1" vertical={false} />
+                    <XAxis dataKey="time" stroke="#64748b" tick={{fontSize: 10, fontFamily: 'Space Grotesk'}} axisLine={false} tickLine={false} />
+                    <YAxis stroke="#64748b" tick={{fontSize: 10, fontFamily: 'Space Grotesk'}} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                    <Tooltip 
+                      contentStyle={{backgroundColor: '#0f172a', color: '#fff', border: 'none', borderRadius: '0', boxShadow: '4px 4px 0px rgba(15,23,42,1)'}} 
+                      itemStyle={{color: '#ef4444', fontWeight: 'bold'}}
+                    />
+                    <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
+                    <Line type="monotone" dataKey="accel" stroke="#ef4444" strokeWidth={3} dot={false} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+          </div>
+
+        </main>
+
+        {/* SLIDING SIDE PANEL */}
+        <AnimatePresence>
+          {activePanel && (
+            <motion.aside 
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 450, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
+              className="bg-slate-100 flex flex-col overflow-hidden border-l-2 border-slate-900"
+            >
+              <div className="w-[450px] h-full flex flex-col overflow-y-auto custom-scrollbar">
+                
+                {/* FLEET STATUS PANEL */}
+                {activePanel === 'fleet' && (
+                  <div className="p-6">
+                    <div className="flex justify-between items-center mb-8 border-b-2 border-slate-900 pb-4">
+                      <div>
+                        <h2 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Fleet Status</h2>
+                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Node Diagnostics</p>
+                      </div>
+                      <button onClick={() => setActivePanel(null)} className="p-2 border-2 border-transparent hover:border-slate-900 transition-colors cursor-pointer">
+                        <X className="w-5 h-5 text-slate-900" />
+                      </button>
+                    </div>
+                    <div className="space-y-4">
+                      {nodes.map(node => {
+                        const nData = displayData?.nodes[node.id];
+                        const isNodeSelected = selectedNode === node.id;
+                        return (
+                          <div 
+                            key={node.id} 
+                            onClick={() => setSelectedNode(node.id)}
+                            className={`p-4 border-2 transition-all cursor-pointer ${isNodeSelected ? 'border-slate-900 bg-sky-100 shadow-[4px_4px_0px_rgba(15,23,42,1)] translate-x-[-2px] translate-y-[-2px]' : 'border-slate-300 bg-white hover:border-slate-900 hover:shadow-[4px_4px_0px_rgba(15,23,42,1)] hover:translate-x-[-2px] hover:translate-y-[-2px]'}`}
+                          >
+                            <div className="flex justify-between items-center mb-3">
+                              <div className="font-bold text-slate-900 uppercase tracking-widest text-sm flex items-center gap-2">
+                                <Cpu className="w-4 h-4" /> {node.id}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Signal className="w-3 h-3 text-emerald-600" />
+                                <span className="text-[10px] font-bold text-slate-500">-42dBm</span>
+                              </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-4 mt-4 text-xs font-mono">
+                              <div className="flex flex-col">
+                                <span className="text-[10px] uppercase font-sans font-bold text-slate-500 mb-1">Battery</span>
+                                <div className="flex items-center gap-2 font-bold">
+                                  {nData?.charging ? <BatteryCharging className="w-4 h-4 text-amber-500" /> : <Battery className="w-4 h-4 text-slate-700" />}
+                                  {nData?.battery || 0}V
+                                </div>
+                              </div>
+                              <div className="flex flex-col">
+                                <span className="text-[10px] uppercase font-sans font-bold text-slate-500 mb-1">Status</span>
+                                <span className="text-emerald-600 font-bold">ONLINE</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
-                {nodes.map(node => (
-                  <CircleMarker
-                    key={node.id}
-                    center={node.pos}
-                    radius={isCritical ? 12 : 8}
-                    eventHandlers={{ click: () => setSelectedNode(node.id) }}
-                    pathOptions={{
-                      color: selectedNode === node.id ? '#3b82f6' : (isCritical ? '#ef4444' : '#10b981'),
-                      fillColor: selectedNode === node.id ? '#3b82f6' : (isCritical ? '#ef4444' : '#10b981'),
-                      fillOpacity: selectedNode === node.id ? 1 : 0.7,
-                      className: isCritical ? 'animate-ping' : ''
-                    }}
-                  >
-                    <Popup className="bg-slate-800 text-white border-slate-700">
-                      <strong>{node.id.toUpperCase()}</strong><br/>
-                      Click to view telemetry
-                    </Popup>
-                  </CircleMarker>
-                ))}
-              </MapContainer>
-            </div>
-            <p className="text-xs text-slate-400 mt-2 text-center">Click a node on the map to switch telemetry view</p>
-          </div>
-        </div>
 
-        {/* RIGHT COLUMN: Charts */}
-        <div className="lg:col-span-2 space-y-6">
-          
-          <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-lg p-5 flex flex-col justify-between">
-             <div className="flex justify-between items-center mb-4">
-               <h2 className="text-lg font-semibold text-white">Vibration Telemetry</h2>
-               <select 
-                 value={selectedNode} 
-                 onChange={(e) => setSelectedNode(e.target.value)}
-                 className="bg-slate-900 border border-slate-700 text-white text-sm rounded-lg p-2 outline-none"
-               >
-                 {nodes.map(n => <option key={n.id} value={n.id}>{n.id.replace('_', ' ').toUpperCase()}</option>)}
-               </select>
-             </div>
-            <div className="h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="time" stroke="#94a3b8" tick={{fontSize: 12}} />
-                  <YAxis stroke="#94a3b8" />
-                  <Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #334155'}} />
-                  <Line type="monotone" dataKey="vib" stroke="#eab308" strokeWidth={2} dot={false} isAnimationActive={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+                {/* AHSM PANEL CONTENT */}
+                {activePanel === 'ahsm' && (
+                  <div className="p-6">
+                    <div className="flex justify-between items-center mb-8 border-b-2 border-slate-900 pb-4">
+                      <div>
+                        <h2 className="text-xl font-bold text-slate-900 uppercase tracking-tight">AHSM Planner</h2>
+                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Sensor Distribution</p>
+                      </div>
+                      <button onClick={() => setActivePanel(null)} className="p-2 border-2 border-transparent hover:border-slate-900 transition-colors cursor-pointer">
+                        <X className="w-5 h-5 text-slate-900" />
+                      </button>
+                    </div>
+                    
+                    <div className="mb-6 pb-6 border-b-2 border-slate-200">
+                      <label className="block text-[10px] font-bold text-slate-900 uppercase tracking-widest mb-2">Extraction Method</label>
+                      <select 
+                        value={extractionMethod}
+                        onChange={(e) => setExtractionMethod(e.target.value)}
+                        className="w-full bg-slate-100 border-2 border-slate-900 p-3 text-sm font-bold uppercase outline-none focus:bg-cyan-50 cursor-pointer"
+                      >
+                        <option value="Traditional Pillar">Traditional Pillar</option>
+                        <option value="Wide Stall">Wide Stall (Indian Standard)</option>
+                      </select>
+                    </div>
 
-          <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-lg p-5">
-            <h2 className="text-lg font-semibold text-white mb-4">Tilt Telemetry ({selectedNode.replace('_', ' ').toUpperCase()})</h2>
-            <div className="h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="time" stroke="#94a3b8" tick={{fontSize: 12}} />
-                  <YAxis stroke="#94a3b8" domain={['auto', 'auto']} />
-                  <Tooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #334155'}} />
-                  <Line type="monotone" dataKey="tilt" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
 
-        </div>
+                    {!isGridGenerated ? (
+                      <div className="space-y-6">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-900 uppercase tracking-widest mb-2">Location Target</label>
+                          <input type="text" defaultValue="23.7431, 86.4190" className="w-full bg-slate-100 border-2 border-slate-900 p-3 font-mono text-sm outline-none focus:bg-cyan-50" />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-900 uppercase tracking-widest mb-2">Overburden Type (Angle of Draw)</label>
+                          <select 
+                            value={drawAngleStr}
+                            onChange={(e) => setDrawAngleStr(e.target.value)}
+                            className="w-full bg-slate-100 border-2 border-slate-900 p-3 text-sm font-bold uppercase outline-none focus:bg-cyan-50 cursor-pointer"
+                          >
+                            <option value="22">Hard Sandstone (22°)</option>
+                            <option value="45">Soft Alluvium (45°)</option>
+                            <option value="35">Shale Mix (35°)</option>
+                          </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-900 uppercase tracking-widest mb-2">Depth (m)</label>
+                            <input 
+                              type="number" 
+                              value={mineDepth} 
+                              onChange={(e) => setMineDepth(parseFloat(e.target.value) || 0)} 
+                              className="w-full bg-slate-100 border-2 border-slate-900 p-3 font-mono text-sm outline-none focus:bg-cyan-50" 
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-900 uppercase tracking-widest mb-2">Seam (m)</label>
+                            <input 
+                              type="number" 
+                              value={seamThickness} 
+                              onChange={(e) => setSeamThickness(parseFloat(e.target.value) || 0)} 
+                              className="w-full bg-slate-100 border-2 border-slate-900 p-3 font-mono text-sm outline-none focus:bg-cyan-50" 
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-900 uppercase tracking-widest mb-2">Primary Key Stratum Depth (m)</label>
+                          <input 
+                            type="number" 
+                            value={keyStratumDepth} 
+                            onChange={(e) => setKeyStratumDepth(parseFloat(e.target.value) || 0)} 
+                            className="w-full bg-slate-100 border-2 border-slate-900 p-3 font-mono text-sm outline-none focus:bg-cyan-50" 
+                          />
+                        </div>
+
+                        <button 
+                          onClick={() => setIsGridGenerated(true)}
+                          className="w-full mt-4 bg-slate-900 text-white font-bold uppercase tracking-widest py-4 border-2 border-slate-900 hover:bg-sky-300 hover:text-slate-900 hover:shadow-[4px_4px_0px_rgba(15,23,42,1)] hover:-translate-y-1 transition-all cursor-pointer"
+                        >
+                          Calculate Hyperbola Grid
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        <div className="bg-slate-900 text-white p-5 border-2 border-slate-900">
+                          <h3 className="font-bold uppercase tracking-widest text-sm mb-4 border-b border-white/20 pb-2">Manifest Generated</h3>
+                          <div className="space-y-2 font-mono text-xs">
+                            <div className="flex justify-between"><span className="text-white/60">Target</span> <span>Panel 4</span></div>
+                            <div className="flex justify-between"><span className="text-white/60">Angle of Draw</span> <span>{drawAngleStr}°</span></div>
+                            <div className="flex justify-between"><span className="text-white/60">Hyperbola Nodes</span> <span className="text-sky-300 font-bold">{suggestedPlacements.length}</span></div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <h4 className="text-[10px] font-bold text-slate-900 uppercase tracking-widest mb-3">Deployment Coordinates</h4>
+                          <div className="border-2 border-slate-900 bg-slate-100 p-4 h-[200px] overflow-y-auto custom-scrollbar font-mono text-xs space-y-3">
+                            {suggestedPlacements.map((pos, i) => (
+                              <div key={i} className="flex justify-between border-b border-slate-200 pb-2 last:border-0 last:pb-0">
+                                <span className="font-bold text-slate-500">AHSM-{(i+1).toString().padStart(2, '0')}</span>
+                                <span>{pos[0].toFixed(5)}, {pos[1].toFixed(5)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <button 
+                          onClick={() => setIsGridGenerated(false)}
+                          className="w-full bg-slate-100 text-slate-900 font-bold uppercase tracking-widest py-3 border-2 border-slate-900 hover:bg-slate-200 transition-colors text-xs shadow-[4px_4px_0px_rgba(15,23,42,1)] cursor-pointer"
+                        >
+                          Modify Parameters
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </motion.aside>
+          )}
+        </AnimatePresence>
+
       </div>
     </div>
   );
